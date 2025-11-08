@@ -441,14 +441,22 @@ Let's see our creation in action!
 
 ```csv
 product_name,keywords
-"Udi Walker Boots","rainy season ready, laterite grip, mud-resistant, for trekking Udi hills"
-"Ike Go Power Bank","NEPA-proof, 20000mAh, charge phone and fan, long-lasting"
-"Ozi Health Watch","heart rate monitor, GPS for routes, sweat-resistant, sleep tracking"
-"Aba Grind Master","grinds egusi crayfish and ogbono, dry & wet grinding, durable blades, market-grade"
-"Oganiru Solar Generator","silent inverter, fuel-free power, charge laptops and TV, solar panel included"
-"Ije Pro Backpack","Onitsha market-proof, anti-theft design, padded laptop sleeve, heavy-duty zippers"
-"Anwụnta Guard Zapper","mosquito killer, insect trap, child-safe, low-power, no chemicals"
-"Aku Business Box","trader's cash safe, durable lock, sales record book, fire-resistant"
+"Udi Walker Boots","rainy season ready, waterproof leather, deep treads for laterite grip, mud-resistant, for trekking Udi hills"
+"Ike Go Power Bank","NEPA-proof, 20000mAh, sleek black casing with digital display, charge phone and fan, long-lasting"
+"Ozi Health Watch","heart rate monitor, GPS for routes, black silicone sweat-resistant strap, bright color screen, sleep tracking"
+"Aba Grind Master","grinds egusi crayfish and ogbono, stainless steel body, transparent lid, durable sharp blades, market-grade"
+"Oganiru Solar Generator","silent inverter, portable box design with handle, fuel-free power, includes two foldable solar panels, powers laptops and TV"
+"Ije Pro Backpack","Onitsha market-proof, black anti-theft design, hidden zippers, padded laptop sleeve, water-resistant fabric"
+"Anwụnta Guard Zapper","mosquito killer, modern white lantern design, insect trap, child-safe cage, low-power UV light, no chemicals"
+"Aku Business Box","trader's cash safe, fire-resistant metal box, secure key lock, includes sales record book and pen"
+"Nka Art Blender","blends fufu and soups, powerful motor, large stainless steel jug, white base with green accents, crushes ice and nuts"
+"Adanna Style Headwrap","vibrant ankara print, pre-tied gele style, silky fabric, bold yellow and blue geometric pattern, for weddings"
+"Okada Rider Helmet","DOT-certified for safety, glossy black finish, clear anti-scratch full-face visor, comfortable inner padding"
+"Umu Ada Dinner Set","chip-resistant ceramic plates, traditional uli-inspired patterns, deep blue and white glaze, service for four"
+"Lagos Traffic Earbuds","active noise cancellation, crisp sound with deep bass, compact white charging case, secure in-ear fit for commute"
+"Garri Turner Pro","modern kitchen utensil, heat-resistant blue silicone spatula, smooth ergonomic wooden handle, non-stick turning"
+"Nze Senator Wear","men's traditional wear, crisp cream-colored linen fabric, intricate gold embroidery on the chest, tailored fit"
+"Chop Life Food Flask","keeps food hot for 12 hours, wide-mouth stainless steel jar, sleek metallic red color, includes a foldable spoon in lid"
 ```
 
 ### 4.2. Upload the File to Cloud Storage
