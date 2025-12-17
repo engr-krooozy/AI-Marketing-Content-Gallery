@@ -4,7 +4,7 @@
 
 Welcome! In this hands-on workshop, you'll build a powerful, resilient, multi-modal, serverless AI application on Google Cloud. Forget complex pipelines and long deployments. 
 
-You will build an automated content factory that reads product information from a CSV file, uses Google's **Gemini 2.5 Pro** model to write compelling marketing descriptions, and then calls the **Imagen** model to generate a unique product image to match. The entire process is protected by content moderation filters and includes robust error handling, with all results stored in **BigQuery**, Google's serverless data warehouse.
+You will build an automated content factory that reads product information from a CSV file, uses Google's **Gemini 3.0 Pro** model to write compelling marketing descriptions, and then calls the **Gemini 3.0 Image** model to generate a unique product image to match. The entire process is protected by content moderation filters and includes robust error handling, with all results stored in **BigQuery**, Google's serverless data warehouse.
 
 ---
 
@@ -13,11 +13,12 @@ You will build an automated content factory that reads product information from 
 *   How to set up a Google Cloud environment using Cloud Shell.
 *   The fundamentals of a serverless, event-driven architecture.
 *   How to write, configure, and deploy a production-ready Python **Cloud Function**.
-*   How to call and chain multiple **Vertex AI** models (**Gemini** for text and **Imagen** for images).
+*   How to call and chain multiple **Vertex AI** models (**Gemini** for text and **Gemini Image** for images).
 *   How to implement content moderation using built-in safety filters.
 *   How to build a resilient pipeline with robust error handling.
 *   How to use **Cloud Storage** to trigger events and store multiple types of artifacts.
 *   How to store and query structured results in **BigQuery**.
+*   How to build and deploy a **Streamlit** frontend application on **Cloud Run**.
 
 ### Our Architecture
 
@@ -27,9 +28,11 @@ We will build a resilient, multi-modal system with several Google Cloud services
 
 The Cloud Function then performs several actions:
 1.  Calls **Vertex AI (Gemini)** to generate text.
-2.  Calls **Vertex AI (Imagen)** to generate an image from the text.
+2.  Calls **Gemini 3.0 Image** to generate an image from the text.
 3.  Stores the generated text and image URL in **BigQuery**.
 4.  Stores the generated image file in a separate **Cloud Storage (Image) Bucket**.
+
+Finally, we have a **Streamlit App** running on **Cloud Run** that reads from BigQuery to display the results in a beautiful gallery.
 
 If any file fails during processing, it is automatically moved to a **Cloud Storage (Failed) Bucket**.
 
@@ -116,6 +119,21 @@ echo "Permissions granted to Cloud Storage service account."
 
 ---
 
+
+### 1.5. Setup Google API Key
+
+To access the Gemini 3.0 Pro models, we need a Google API Key.
+
+1.  **Action:** Go to [Google AI Studio](https://aistudio.google.com/app/apikey) to get an API key.
+2.  **Action:** In Cloud Shell, export this key as an environment variable.
+
+```bash
+# Export your Google API Key
+export GOOGLE_API_KEY="your_api_key_goes_here"
+```
+
+---
+
 ## Section 2: Create Your Cloud Resources (Approx. 10 mins)
 
 Next, let's create the storage bucket and BigQuery table that our application will use.
@@ -196,205 +214,193 @@ mkdir -p content-generator-function
 ```
 ```bash
 # Create the main.py file using a "here document"
+# Create the main.py file using a "here document"
 cat > content-generator-function/main.py << EOF
 import functions_framework
-import vertexai
-
-from google.cloud import bigquery
-from google.cloud import storage
-from vertexai.generative_models import GenerativeModel, HarmCategory, HarmBlockThreshold, Part
-
-import csv
 import logging
 import os
-from datetime import datetime
-from io import StringIO
 import io
 
-# --- Environment Variables ---
-# These are read once when the function instance starts.
-GCP_PROJECT_ID = os.environ.get("GCP_PROJECT_ID")
-GCP_REGION = os.environ.get("GCP_REGION")
-BQ_DATASET = os.environ.get("BQ_DATASET")
-BQ_TABLE = os.environ.get("BQ_TABLE")
-FAILED_BUCKET_NAME = os.environ.get("FAILED_BUCKET_NAME")
-PRODUCT_IMAGES_BUCKET_NAME = os.environ.get("PRODUCT_IMAGES_BUCKET_NAME")
-
-def move_to_failed_bucket(storage_client, bucket_name, file_name):
-    """Moves a file to the designated 'failed' bucket."""
-    if not FAILED_BUCKET_NAME:
-        logging.error("FAILED_BUCKET_NAME environment variable not set. Cannot move file.")
-        return
-
-    source_bucket = storage_client.bucket(bucket_name)
-    destination_bucket = storage_client.bucket(FAILED_BUCKET_NAME)
-    source_blob = source_bucket.blob(file_name)
-
-    # To move, we copy the file and then delete the original
-    try:
-        destination_blob = source_bucket.copy_blob(source_blob, destination_bucket, file_name)
-        source_blob.delete()
-        logging.info(f"Moved '{file_name}' to failed bucket: gs://{FAILED_BUCKET_NAME}/{destination_blob.name}")
-    except Exception as e:
-        logging.error(f"Failed to move '{file_name}' to failed bucket: {e}", exc_info=True)
+# NOTE: Do not add any top-level logic or heavy imports here.
+# The container must start and listen on port 8080 immediately.
+# All initialization must happen inside the function handler.
 
 @functions_framework.cloud_event
 def process_csv_and_generate_content(cloud_event):
-    # : Initialize Clients within the function handler ---
+    """
+    Cloud Function entry point.
+    Processes CSV from Storage, generates content with Gemini 3, and saves to BigQuery/Storage.
+    """
+    # 1. Setup Logging (safe to do here)
+    logging.basicConfig(level=logging.INFO)
+    logging.info("Function 'process_csv_and_generate_content' started.")
+
     try:
+        # 2. Lazy Import Heavy Dependencies
+        import json
+        import csv
+        from datetime import datetime
+        from google.cloud import bigquery
+        from google.cloud import storage
+        import google.generativeai as genai
+
+        # 3. Configuration
+        GCP_PROJECT_ID = os.environ.get("GCP_PROJECT_ID")
+        GCP_REGION = os.environ.get("GCP_REGION")
+        BQ_DATASET = os.environ.get("BQ_DATASET")
+        BQ_TABLE = os.environ.get("BQ_TABLE")
+        FAILED_BUCKET_NAME = os.environ.get("FAILED_BUCKET_NAME")
+        PRODUCT_IMAGES_BUCKET_NAME = os.environ.get("PRODUCT_IMAGES_BUCKET_NAME")
+        GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
+
+        if not GOOGLE_API_KEY:
+            logging.error("Missing required environment variable: GOOGLE_API_KEY")
+            return
+
+        # 4. Initialize Clients
         storage_client = storage.Client()
         bq_client = bigquery.Client()
-        vertexai.init(project=GCP_PROJECT_ID, location=GCP_REGION)
-        # Add safety settings to the model to block harmful content.
-        safety_settings = {
-            HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
-            HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
-            HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
-            HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
-        }
-        text_model = GenerativeModel("gemini-2.5-pro", safety_settings=safety_settings)
-        # MODIFICATION: Use GenerativeModel for image generation
-        image_model = GenerativeModel("gemini-2.5-flash-image")
-        logging.info("Successfully initialized clients and Vertex AI models for this invocation.")
-    except Exception as e:
-        logging.error(f"CRITICAL: Failed to initialize clients or models: {e}", exc_info=True)
-        # If clients fail, we can't proceed.
-        return "Initialization failed", 500
+        genai.configure(api_key=GOOGLE_API_KEY)
 
-    data = cloud_event.data
-    bucket_name = data["bucket"]
-    file_name = data["name"]
-    logging.info(f"Triggered by file: gs://{bucket_name}/{file_name}")
+        # 5. Initialize Models
+        text_model = genai.GenerativeModel("models/gemini-3-pro-preview")
+        image_model = genai.GenerativeModel("models/gemini-3-pro-image-preview")
 
-    # --- File Download and Processing ---
-    try:
-        bucket = storage_client.bucket(bucket_name)
-        blob = bucket.blob(file_name)
-        csv_content = blob.download_as_text(encoding="utf-8")
-        logging.info(f"Successfully downloaded '{file_name}'.")
+        # 6. Parse Cloud Event
+        data = cloud_event.data
+        bucket_name = data["bucket"]
+        file_name = data["name"]
+        logging.info(f"Triggered by file: gs://{bucket_name}/{file_name}")
 
-        rows_to_insert = []
-        reader = csv.reader(StringIO(csv_content))
+        def move_to_failed_bucket(bucket_name, file_name):
+            """Moves a file to the designated 'failed' bucket."""
+            if not FAILED_BUCKET_NAME:
+                logging.error("FAILED_BUCKET_NAME environment variable not set. Cannot move file.")
+                return
 
-        try:
-            header = next(reader)
-            logging.info(f"CSV Header: {header}")
-        except StopIteration:
-            raise ValueError(f"CSV file '{file_name}' is empty or has no header.")
+            source_bucket = storage_client.bucket(bucket_name)
+            destination_bucket = storage_client.bucket(FAILED_BUCKET_NAME)
+            source_blob = source_bucket.blob(file_name)
 
-        # --- Process Rows and Generate Content ---
-        for i, row in enumerate(reader):
-            if len(row) != 2:
-                logging.warning(f"Skipping malformed row #{i+2} in '{file_name}': {row}")
-                continue
-
-            product_name, keywords = row[0].strip(), row[1].strip()
-
-            if not product_name and not keywords:
-                logging.info(f"Skipping empty row #{i+2} in '{file_name}'.")
-                continue
-
-            generated_image_url = None
             try:
-                # 1. Generate Text
-                prompt = f"Write a short, exciting marketing description for a product named '{product_name}' that is '{keywords}'. The description should be one paragraph."
-                response = text_model.generate_content(prompt)
-
-                if not response.candidates:
-                    generated_text = "Content blocked by safety filter."
-                    logging.warning(f"Content generation for '{product_name}' was blocked by safety filters.")
-                elif hasattr(response.candidates[0].content, 'text'):
-                    generated_text = response.candidates[0].content.text.strip()
-                    logging.info(f"Generated content for '{product_name}'.")
-                else:
-                    generated_text = "Error: No content generated by model."
-                    logging.warning(f"Model response for '{product_name}' lacked a 'text' attribute.")
-
-                # 2. Generate Image (only if text was successful)
-                if "Error:" not in generated_text and "Content blocked" not in generated_text:
-                    try:
-                        image_prompt = f"A professional, high-resolution marketing photo, studio lighting, of: {generated_text}"
-                        # MODIFICATION: Use generate_content for image generation
-                        image_response = image_model.generate_content([image_prompt])
-                        
-                        # Add a check to ensure images were actually generated before proceeding.
-                        if image_response.candidates:
-                            image_part = image_response.candidates[0].content.parts[0]
-                            if image_part.inline_data:
-                                image_bytes = image_part.inline_data.data
-                                image_blob_name = f"{product_name.replace(' ', '_').lower()}_{int(datetime.utcnow().timestamp())}.png"
-
-                                image_bucket = storage_client.bucket(PRODUCT_IMAGES_BUCKET_NAME)
-                                image_blob = image_bucket.blob(image_blob_name)
-                                # Use io.BytesIO to upload from memory
-                                image_blob.upload_from_file(io.BytesIO(image_bytes), content_type="image/png")
-
-                                generated_image_url = image_blob.public_url
-                                logging.info(f"Successfully generated and uploaded image for '{product_name}' to {generated_image_url}")
-                            else:
-                                logging.warning(f"Image generation for '{product_name}' returned no image data.")
-                                generated_image_url = "Error: No image data generated by model."
-                        else:
-                            logging.warning(f"Image generation for '{product_name}' returned no images, possibly due to safety filters.")
-                            generated_image_url = "Error: No image generated by model."
-
-                    except Exception as img_e:
-                        logging.error(f"Failed to generate image for '{product_name}': {img_e}", exc_info=True)
-                        generated_image_url = "Error: Could not generate image."
-
+                destination_blob = source_bucket.copy_blob(source_blob, destination_bucket, file_name)
+                source_blob.delete()
+                logging.info(f"Moved '{file_name}' to failed bucket: gs://{FAILED_BUCKET_NAME}/{destination_blob.name}")
             except Exception as e:
-                logging.error(f"Failed to generate content for '{product_name}': {e}", exc_info=True)
-                generated_text = "Error: Could not generate content due to an exception."
-                generated_image_url = "Error: Could not generate image."
+                logging.error(f"Failed to move '{file_name}' to failed bucket: {e}", exc_info=True)
 
-            rows_to_insert.append({
-                "product_name": product_name,
-                "keywords": keywords,
-                "generated_content": generated_text,
-                "generated_image_url": generated_image_url,
-                "source_file": f"gs://{bucket_name}/{file_name}",
-                "processed_at": datetime.utcnow().isoformat()
-            })
+        # 7. Process File
+        rows_to_insert = []
+        try:
+            bucket = storage_client.bucket(bucket_name)
+            blob = bucket.blob(file_name)
+            csv_content = blob.download_as_text(encoding="utf-8")
+            
+            reader = csv.reader(io.StringIO(csv_content))
+            try:
+                header = next(reader)
+            except StopIteration:
+                raise ValueError(f"CSV file '{file_name}' is empty or has no header.")
 
-        if not rows_to_insert:
-            raise ValueError(f"No valid data rows were processed from '{file_name}'.")
+            for i, row in enumerate(reader):
+                if len(row) < 2: 
+                    logging.warning(f"Skipping malformed row #{i+2} in '{file_name}': {row}")
+                    continue
+
+                product_name = row[0].strip()
+                keywords = row[1].strip()
+
+                if not product_name and not keywords:
+                    continue
+
+                generated_text = None
+                generated_image_url = None
+
+                # Generate Text
+                try:
+                    text_prompt = f"Write a short, exciting marketing description for a product named '{product_name}' that is '{keywords}'. The description should be one paragraph."
+                    text_response = text_model.generate_content(text_prompt)
+                    generated_text = text_response.text.strip()
+                except Exception as e:
+                    logging.error(f"Text generation failed for '{product_name}': {e}")
+                    generated_text = "Error: Text generation failed."
+
+                # Generate Image
+                if generated_text and "Error:" not in generated_text:
+                    try:
+                        image_prompt = f"A professional, high-resolution marketing photo, studio lighting, of: {product_name}, {generated_text[:100]}"
+                        image_response = image_model.generate_content(image_prompt)
+                        
+                        if hasattr(image_response, 'parts') and image_response.parts:
+                            image_bytes = image_response.parts[0].inline_data.data
+                            image_blob_name = f"{product_name.replace(' ', '_').lower()}_{int(datetime.utcnow().timestamp())}.png"
+                            
+                            image_bucket = storage_client.bucket(PRODUCT_IMAGES_BUCKET_NAME)
+                            image_blob = image_bucket.blob(image_blob_name)
+                            # Use io.BytesIO to upload from memory
+                            image_blob.upload_from_file(io.BytesIO(image_bytes), content_type="image/png")
+                            
+                            generated_image_url = image_blob.public_url
+                        else:
+                            generated_image_url = "Error: No image returned."
+
+                    except Exception as e:
+                        logging.error(f"Image generation failed for '{product_name}': {e}")
+                        generated_image_url = "Error: Image generation failed."
+                else:
+                    generated_image_url = "Skipped: Text generation failed."
+
+                rows_to_insert.append({
+                    "product_name": product_name,
+                    "keywords": keywords,
+                    "generated_content": generated_text,
+                    "generated_image_url": generated_image_url,
+                    "source_file": f"gs://{bucket_name}/{file_name}",
+                    "processed_at": datetime.utcnow().isoformat()
+                })
+
+            if not rows_to_insert:
+                 logging.warning(f"No valid rows processed in '{file_name}'.")
+
+        except Exception as e:
+            logging.error(f"Critical error processing '{file_name}': {e}", exc_info=True)
+            move_to_failed_bucket(bucket_name, file_name)
+            return
+
+        # 8. Save to BigQuery
+        if rows_to_insert:
+            try:
+                table_id = f"{GCP_PROJECT_ID}.{BQ_DATASET}.{BQ_TABLE}"
+                errors = bq_client.insert_rows_json(table_id, rows_to_insert)
+                if not errors:
+                    logging.info(f"Inserted {len(rows_to_insert)} rows into BigQuery.")
+                else:
+                    logging.error(f"BigQuery insertion errors: {errors}")
+            except Exception as e:
+                logging.error(f"Failed to insert into BigQuery: {e}")
 
     except Exception as e:
-        # This is the main error handler. If anything goes wrong during download or processing,
-        # log the error and move the file to the failed bucket.
-        logging.error(f"Critical error processing file '{file_name}': {e}", exc_info=True)
-        move_to_failed_bucket(storage_client, bucket_name, file_name)
-        return # Stop execution for this file
-
-    # --- Insert into BigQuery ---
-    try:
-        table_id = f"{GCP_PROJECT_ID}.{BQ_DATASET}.{BQ_TABLE}"
-        errors = bq_client.insert_rows_json(table_id, rows_to_insert)
-        if not errors:
-            logging.info(f"Successfully inserted {len(rows_to_insert)} rows into BigQuery from '{file_name}'.")
-        else:
-            # Improved error logging for BigQuery
-            error_details = [str(e) for e in errors]
-            logging.error(f"Encountered errors inserting into BigQuery: {'; '.join(error_details)}")
-    except Exception as e:
-        logging.error(f"Failed to insert rows into BigQuery: {e}", exc_info=True)
+        logging.error(f"Fatal error in execution: {e}", exc_info=True)
 
     return "OK"
 EOF
+
 ```
 
 **Action:** Run the following command to create the `requirements.txt` file.
 
 ```bash
 # Create the requirements.txt file
+# Create the requirements.txt file
 cat > content-generator-function/requirements.txt << EOF
 # This file lists the Python packages required by the Cloud Function.
 # The Google Cloud Functions environment will automatically install these
 # dependencies when the function is deployed.
 functions-framework>=3.0.0
-google-cloud-storage>=2.0.0
-google-cloud-bigquery>=3.0.0
-google-cloud-aiplatform[generative_models]>=1.38.0
+google-cloud-bigquery>=3.10.0
+google-cloud-storage>=2.10.0
+google-generativeai>=0.3.0
+python-dotenv>=1.0.0
 EOF
 
 echo "Cloud Function source files created successfully."
@@ -418,7 +424,9 @@ gcloud functions deploy generate-content-from-csv \
   --source=. \
   --entry-point=process_csv_and_generate_content \
   --trigger-bucket=$BUCKET_NAME \
-  --set-env-vars=GCP_PROJECT_ID=$PROJECT_ID,GCP_REGION=$REGION,BQ_DATASET=$BQ_DATASET,BQ_TABLE=$BQ_TABLE,FAILED_BUCKET_NAME=$FAILED_BUCKET_NAME,PRODUCT_IMAGES_BUCKET_NAME=$PRODUCT_IMAGES_BUCKET_NAME \
+  --trigger-bucket=$BUCKET_NAME \
+  --set-env-vars=GCP_PROJECT_ID=$PROJECT_ID,GCP_REGION=$REGION,BQ_DATASET=$BQ_DATASET,BQ_TABLE=$BQ_TABLE,FAILED_BUCKET_NAME=$FAILED_BUCKET_NAME,PRODUCT_IMAGES_BUCKET_NAME=$PRODUCT_IMAGES_BUCKET_NAME,GOOGLE_API_KEY=$GOOGLE_API_KEY \
+  --memory=2Gi \
   --memory=2Gi \
   --timeout=540s
 
@@ -441,22 +449,22 @@ Let's see our creation in action!
 
 ```csv
 product_name,keywords
-"Udi Walker Boots","rainy season ready, waterproof leather, deep treads for laterite grip, mud-resistant, for trekking Udi hills"
-"Ike Go Power Bank","NEPA-proof, 20000mAh, sleek black casing with digital display, charge phone and fan, long-lasting"
-"Ozi Health Watch","heart rate monitor, GPS for routes, black silicone sweat-resistant strap, bright color screen, sleep tracking"
-"Aba Grind Master","grinds egusi crayfish and ogbono, stainless steel body, transparent lid, durable sharp blades, market-grade"
-"Oganiru Solar Generator","silent inverter, portable box design with handle, fuel-free power, includes two foldable solar panels, powers laptops and TV"
-"Ije Pro Backpack","Onitsha market-proof, black anti-theft design, hidden zippers, padded laptop sleeve, water-resistant fabric"
-"Anwụnta Guard Zapper","mosquito killer, modern white lantern design, insect trap, child-safe cage, low-power UV light, no chemicals"
-"Aku Business Box","trader's cash safe, fire-resistant metal box, secure key lock, includes sales record book and pen"
-"Nka Art Blender","blends fufu and soups, powerful motor, large stainless steel jug, white base with green accents, crushes ice and nuts"
-"Adanna Style Headwrap","vibrant ankara print, pre-tied gele style, silky fabric, bold yellow and blue geometric pattern, for weddings"
-"Okada Rider Helmet","DOT-certified for safety, glossy black finish, clear anti-scratch full-face visor, comfortable inner padding"
-"Umu Ada Dinner Set","chip-resistant ceramic plates, traditional uli-inspired patterns, deep blue and white glaze, service for four"
-"Lagos Traffic Earbuds","active noise cancellation, crisp sound with deep bass, compact white charging case, secure in-ear fit for commute"
-"Garri Turner Pro","modern kitchen utensil, heat-resistant blue silicone spatula, smooth ergonomic wooden handle, non-stick turning"
-"Nze Senator Wear","men's traditional wear, crisp cream-colored linen fabric, intricate gold embroidery on the chest, tailored fit"
-"Chop Life Food Flask","keeps food hot for 12 hours, wide-mouth stainless steel jar, sleek metallic red color, includes a foldable spoon in lid"
+"Idanre Climber Boots","rainy season ready, waterproof leather, deep treads for slippery rocks, mud-resistant, for climbing Idanre hills and Olumo rock"
+"Agbara Go Power Bank","NEPA-proof, 20000mAh, sleek black casing with digital display, charge phone and fan, long-lasting for Lagos hustle"
+"Ilera Smart Watch","heart rate monitor, GPS for routes, black silicone sweat-resistant strap, bright color screen, sleep tracking"
+"Bodija Grind Master","grinds dry pepper and beans for akara, stainless steel body, transparent lid, durable sharp blades, market-grade"
+"Irorun Solar Generator","silent inverter, portable box design with handle, fuel-free power, includes two foldable solar panels, powers laptops and TV"
+"Eko Commute Backpack","Oshodi-proof, black anti-theft design, hidden zippers, padded laptop sleeve, water-resistant fabric for Danfo rush"
+"Efon Guard Zapper","mosquito killer, modern white lantern design, insect trap, child-safe cage, low-power UV light, no chemicals"
+"Aje Business Box","Iyaloja's cash safe, fire-resistant metal box, secure key lock, includes Ajo/Esusu record book and pen"
+"Iyawo Kitchen Blender","blends beans for moin-moin and gbegiri, powerful motor, large stainless steel jug, white base with green accents, crushes ice"
+"Abike Auto-Gele","vibrant aso-oke print, pre-tied auto-gele style, silky fabric, bold yellow and blue geometric pattern, for Owambe parties"
+"Safe-Journey Helmet","DOT-certified for safety, glossy black finish, clear anti-scratch full-face visor, comfortable inner padding"
+"Iyalode Dinner Set","chip-resistant ceramic plates, traditional adire-inspired patterns, deep indigo and white glaze, service for four"
+"Third Mainland Earbuds","active noise cancellation for traffic, crisp sound with deep bass, compact white charging case, secure in-ear fit for commute"
+"Omorogun Pro","modern kitchen utensil, heat-resistant blue silicone spatula, smooth ergonomic wooden handle, lump-free Amala turning"
+"Otunba Signature Wear","men's traditional kaftan, crisp cream-colored linen fabric, intricate gold embroidery on the chest, tailored fit for chiefs"
+"Jeun Soke Food Flask","keeps Amala hot for 12 hours, wide-mouth stainless steel jar, sleek metallic red color, includes a foldable spoon in lid"
 ```
 
 ### 4.2. Upload the File to Cloud Storage
@@ -514,7 +522,7 @@ The key changes were:
 
 ## Section 7: Implemented Feature: AI-Powered Image Generation
 
-The pipeline is now a truly multi-modal content factory. In addition to generating marketing text, the Cloud Function now calls a second powerful Vertex AI model, **Imagen**, to create a unique product image based on the text description it just wrote.
+The pipeline is now a truly multi-modal content factory. In addition to generating marketing text, the Cloud Function now calls a second powerful Vertex AI model, **Gemini 3.0 Image**, to create a unique product image based on the text description it just wrote.
 
 This showcases the power of chaining different AI models together to build sophisticated, automated workflows.
 
@@ -529,12 +537,131 @@ The key changes to implement this were:
     *   The public URL of this new image is saved to the `generated_image_url` column in BigQuery.
 
 ---
+---
 
-## Section 8: Conclusion & Cleanup
+## Section 9: Bonus - Build a Marketing Gallery App
+
+Let's not keep these amazing results hidden in database tables. We will build a web app to showcase your products!
+
+### 9.1 Create the App Files
+
+Run these commands to create a simple Streamlit app.
+
+```bash
+# Create the frontend app directory
+mkdir -p frontend-app
+
+# Create app.py
+cat > frontend-app/app.py << EOF
+import streamlit as st
+from google.cloud import bigquery
+import os
+
+# --- Configuration ---
+PROJECT_ID = os.environ.get("GCP_PROJECT_ID")
+DATASET_ID = os.environ.get("BQ_DATASET")
+TABLE_ID = os.environ.get("BQ_TABLE")
+
+st.set_page_config(page_title="AI Marketing Gallery", layout="wide")
+
+st.title("🛍️ AI Marketing Content Gallery")
+st.markdown(f"Displaying results from BigQuery table: \`{PROJECT_ID}.{DATASET_ID}.{TABLE_ID}\`")
+
+if not PROJECT_ID or not DATASET_ID or not TABLE_ID:
+    st.error("Missing environment variables. Please check your deployment.")
+else:
+    try:
+        client = bigquery.Client()
+        
+        # Query the latest 20 results
+        query = f"""
+            SELECT product_name, keywords, generated_content, generated_image_url
+            FROM \`{PROJECT_ID}.{DATASET_ID}.{TABLE_ID}\`
+            WHERE generated_image_url IS NOT NULL 
+              AND generated_image_url NOT LIKE 'Error%'
+            ORDER BY processed_at DESC
+            LIMIT 20
+        """
+        
+        query_job = client.query(query)
+        results = query_job.result()
+        
+        cols = st.columns(3) # Create a grid layout
+        
+        for i, row in enumerate(results):
+            with cols[i % 3]:
+                st.subheader(row.product_name)
+                if row.generated_image_url:
+                    st.image(row.generated_image_url, use_container_width=True)
+                
+                st.markdown("**Keywords:** " + row.keywords)
+                with st.expander("Read Marketing Copy"):
+                    st.write(row.generated_content)
+                st.divider()
+                
+    except Exception as e:
+        st.error(f"Error connecting to BigQuery: {e}")
+EOF
+```
+
+```bash
+# Create requirements.txt
+cat > frontend-app/requirements.txt << EOF
+streamlit
+google-cloud-bigquery
+pandas
+db-dtypes
+EOF
+```
+
+```bash
+# Create Dockerfile
+cat > frontend-app/Dockerfile << EOF
+FROM python:3.11-slim
+
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY app.py .
+
+EXPOSE 8080
+
+CMD ["streamlit", "run", "app.py", "--server.port=8080", "--server.address=0.0.0.0"]
+EOF
+```
+
+### 9.2 Deploy to Cloud Run
+
+We will deploy this app container to Cloud Run, Google's serverless container platform.
+
+```bash
+# Build the container image using Cloud Build
+cd frontend-app
+gcloud builds submit --tag gcr.io/$PROJECT_ID/marketing-gallery
+cd ..
+```
+
+```bash
+# Deploy to Cloud Run
+gcloud run deploy marketing-gallery \
+  --image gcr.io/$PROJECT_ID/marketing-gallery \
+  --platform managed \
+  --region $REGION \
+  --allow-unauthenticated \
+  --set-env-vars=GCP_PROJECT_ID=$PROJECT_ID,BQ_DATASET=$BQ_DATASET,BQ_TABLE=$BQ_TABLE
+```
+
+Wait a moment, and you will get a **Service URL**. Click it to see your AI-generated product gallery!
+
+---
+
+## Section 10: Conclusion & Cleanup
 
 Congratulations! You've successfully built and tested a serverless AI application on Google Cloud. You learned how to connect several powerful services to create an intelligent, automated workflow.
 
-### 8.1. Cleanup
+### 10.1. Cleanup
 
 To avoid ongoing charges, run these commands to delete the resources you created.
 
@@ -544,13 +671,19 @@ To avoid ongoing charges, run these commands to delete the resources you created
 # 1. Delete the Cloud Function
 gcloud functions delete generate-content-from-csv --region=$REGION --gen2 --quiet
 
-# 2. Delete the GCS Bucket (the -r and -f flags remove all contents first)
-gsutil rm -r -f gs://$BUCKET_NAME
+# 2. Delete the Cloud Run Service
+gcloud run services delete marketing-gallery --region=$REGION --quiet
 
-# 3. Delete the BigQuery Dataset (the -r and -f flags remove all tables first)
+# 3. Delete the GCS Bucket (the -r and -f flags remove all contents first)
+gsutil rm -r -f gs://$BUCKET_NAME
+gsutil rm -r -f gs://$PRODUCT_IMAGES_BUCKET_NAME
+gsutil rm -r -f gs://$FAILED_BUCKET_NAME
+
+# 4. Delete the BigQuery Dataset (the -r and -f flags remove all tables first)
 bq rm -r -f --dataset ${PROJECT_ID}:${BQ_DATASET}
 
 echo "Cleanup complete. All resources have been deleted."
 ```
+
 
 **Thank you for participating in the workshop!**
