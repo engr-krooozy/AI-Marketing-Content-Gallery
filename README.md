@@ -450,21 +450,24 @@ Let's see our creation in action!
 ```csv
 product_name,keywords
 "Idanre Climber Boots","rainy season ready, waterproof leather, deep treads for slippery rocks, mud-resistant, for climbing Idanre hills and Olumo rock"
-"Agbara Go Power Bank","NEPA-proof, 20000mAh, sleek black casing with digital display, charge phone and fan, long-lasting for Lagos hustle"
-"Ilera Smart Watch","heart rate monitor, GPS for routes, black silicone sweat-resistant strap, bright color screen, sleep tracking"
 "Bodija Grind Master","grinds dry pepper and beans for akara, stainless steel body, transparent lid, durable sharp blades, market-grade"
-"Irorun Solar Generator","silent inverter, portable box design with handle, fuel-free power, includes two foldable solar panels, powers laptops and TV"
-"Eko Commute Backpack","Oshodi-proof, black anti-theft design, hidden zippers, padded laptop sleeve, water-resistant fabric for Danfo rush"
 "Efon Guard Zapper","mosquito killer, modern white lantern design, insect trap, child-safe cage, low-power UV light, no chemicals"
-"Aje Business Box","Iyaloja's cash safe, fire-resistant metal box, secure key lock, includes Ajo/Esusu record book and pen"
-"Iyawo Kitchen Blender","blends beans for moin-moin and gbegiri, powerful motor, large stainless steel jug, white base with green accents, crushes ice"
 "Abike Auto-Gele","vibrant aso-oke print, pre-tied auto-gele style, silky fabric, bold yellow and blue geometric pattern, for Owambe parties"
-"Safe-Journey Helmet","DOT-certified for safety, glossy black finish, clear anti-scratch full-face visor, comfortable inner padding"
 "Iyalode Dinner Set","chip-resistant ceramic plates, traditional adire-inspired patterns, deep indigo and white glaze, service for four"
-"Third Mainland Earbuds","active noise cancellation for traffic, crisp sound with deep bass, compact white charging case, secure in-ear fit for commute"
 "Omorogun Pro","modern kitchen utensil, heat-resistant blue silicone spatula, smooth ergonomic wooden handle, lump-free Amala turning"
 "Otunba Signature Wear","men's traditional kaftan, crisp cream-colored linen fabric, intricate gold embroidery on the chest, tailored fit for chiefs"
-"Jeun Soke Food Flask","keeps Amala hot for 12 hours, wide-mouth stainless steel jar, sleek metallic red color, includes a foldable spoon in lid"
+"Zenith Sleep Mask","100% blackout, contoured memory foam, zero eye pressure, adjustable strap, deep REM sleep, travel essential"
+"Nomad Press Tumbler","portable french press, vacuum insulated, keeps coffee hot 8 hours, leak-proof, stainless steel, commuter friendly"
+"HydroCore Smart Bottle","hydration tracker, glows to remind you to drink, self-cleaning UV light, keeps water cold 24hrs, bpa-free"
+"GridLock Tech Pouch","cable management, waterproof origami design, accessories organizer, tangle-free storage, fits chargers and drives"
+"CloudWalk Weighted Blanket","anxiety relief, cooling bamboo fabric, glass bead filling, deep pressure stimulation, machine washable, stress-free sleep"
+"ChefMate 5-in-1 Slicer","vegetable chopper, mandoline slicer, safety hand guard, meal prep speed, stainless steel blades, easy clean"
+"ErgoLift Laptop Stand","adjustable height, aluminum alloy, prevents neck strain, heat dissipation, portable folding design, remote work setup"
+"LumaFlex Neck Light","hands-free reading, 3 brightness levels, eye-protection LED, rechargeable, partner-friendly night light, knitting and repair"
+"SilentStep Yoga Mat","non-slip grip, extra thick cushioning, eco-friendly TPE, alignment lines, joint protection, sweat resistant"
+"PureAir Desk Purifier","HEPA filter, removes allergens and dust, usb powered, whisper quiet, compact for office or bedside, fresh air"
+"VoltKey Universal Adapter","all-in-one travel plug, 4 USB ports, works in 150+ countries, surge protection, fast charging, compact cube"
+"GlowRing Selfie Light","clip-on ring light, 3 color modes, rechargeable battery, perfect for zoom calls and tiktok, pocket-sized studio lighting"
 ```
 
 ### 4.2. Upload the File to Cloud Storage
